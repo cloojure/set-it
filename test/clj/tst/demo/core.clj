@@ -13,13 +13,13 @@
   )
 
 (defn atom?
-  "Returns true iff the arg is a clojure.lang.Atom."
+  "Returns true iff arg is a clojure.lang.Atom."
   [arg] (= (type arg) clojure.lang.Atom))
 (defn agent?
-  "Returns true iff the arg is a clojure.lang.Agent."
+  "Returns true iff arg is a clojure.lang.Agent."
   [arg] (= (type arg) clojure.lang.Agent))
 (defn ref?
-  "Returns true iff the arg is a clojure.lang.Ref."
+  "Returns true iff arg is a clojure.lang.Ref."
   [arg] (= (type arg) clojure.lang.Ref))
 
 (defmacro set-it
@@ -74,9 +74,11 @@
 
 (dotest
   (def five 5)
-  (spyx (var? five))
-  (spyx (var? (var five)))
- ;(spyx (bound? six))   ; syntax error compiling at line XXXXX;  Unable to resolve symbol: six in this context
+  (isnt (spyx (var? five)))
+  (is (spyx (var? (var five))))
+  (is (spyx (var? #'five))) ; => `(var five)`
+  ;(spyx (bound? six))   ; syntax error compiling at line XXXXX;  Unable to resolve symbol: six in this context
+
   (let [local-five     five
         local-var-five (var five) ]
     (is= local-five 5)
@@ -84,15 +86,53 @@
     (is= (var-get local-var-five) 5)
     (is= 5 five)
     (isnt= 5 #'five)
-    (is= 5 (unvar #'five))
-    (is= 5 (unvar (var five)))
-    (is= 5 (unvar five))
-    (is= 5 (unvar 5))
-    )
 
-  (is (atom? (atom nil)))
-  (isnt (atom? (agent 0)))
+    (is= (var five) #'five local-var-five) ; the var object
+
+    (is= 5 ; the var points to this value
+      ; `unvar` will dereference a Var object, returning the value the Var points to
+      (unvar #'five)
+      (unvar (var five))
+      (unvar local-var-five) )
+
+    ; When passed any rag except a Var object, `unvar` returns it unchanged
+    (is= 5
+      (unvar five)
+      (unvar 5))
+
+    ; There are many ways to deref a Var object
+    (is= 5
+      (unvar local-five) ; harmless if passed a regular value like `5`
+      (unvar local-var-five) ; here it deref's a Var object
+      (unvar (unvar local-var-five))) ; idempotent
+
+    ; These 3 are all equivalent
+    (is= 5
+      (deref local-var-five)
+      (var-get local-var-five)
+      @local-var-five))
+
   (throws? (set-it {} 5))
+
+  (isnt (var? 5)) ; 5 is a value
+  (isnt (var? five)) ; auto-deref replaces `five` with `5`
+  (is   (var? (var five)))
+  (is   (var?    #'five)) ; shortcut for above
+  (with-local-vars [x 42]
+    (is (var? x))
+    (is= 42 (unvar x) (deref x) (var-get x) @x))
+
+  (isnt (atom? 5))
+  (is   (atom? (atom 5)))
+  (isnt (atom? (agent 5)))
+
+  (isnt (agent? 5))
+  (is   (agent? (agent 5)))
+  (isnt (agent? (atom 5)))
+
+  (isnt (ref? 5))
+  (is   (ref? (ref 5)))
+  (isnt (ref? (agent 5)))
 
   (nl) (println :var-dynamic)
   (def ^:dynamic fred nil)
@@ -119,6 +159,7 @@
 
   (nl) (println :var-local)
   (with-local-vars [x 1]
+    (is (var? x))
     (spyx @x)
     (set-it-local x 3)
     (spyx (get-it-local x))
