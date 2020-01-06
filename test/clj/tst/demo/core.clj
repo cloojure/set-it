@@ -60,15 +60,36 @@
   `(let [~'it (clojure.core/deref ~var-obj)] ; or var-get
      (clojure.core/var-set ~var-obj ~@forms)))
 
+(defn unvar
+  "When passed a clojure var-object, returns the referenced value (via deref/var-get);
+  else returns arg unchanged."
+  [value-or-var]
+  (if (var? value-or-var)
+    (deref value-or-var) ; or var-get
+    value-or-var))
+
 (defmacro var-anon
   [val]
   `(def new-var# ~val))
 
-(def five 5)
 (dotest
+  (def five 5)
   (spyx (var? five))
   (spyx (var? (var five)))
- ;(spyx (bound? six))
+ ;(spyx (bound? six))   ; syntax error compiling at line XXXXX;  Unable to resolve symbol: six in this context
+  (let [local-five     five
+        local-var-five (var five) ]
+    (is= local-five 5)
+    (is (var? local-var-five))
+    (is= (var-get local-var-five) 5)
+    (is= 5 five)
+    (isnt= 5 #'five)
+    (is= 5 (unvar #'five))
+    (is= 5 (unvar (var five)))
+    (is= 5 (unvar five))
+    (is= 5 (unvar 5))
+    )
+
   (is (atom? (atom nil)))
   (isnt (atom? (agent 0)))
   (throws? (set-it {} 5))
