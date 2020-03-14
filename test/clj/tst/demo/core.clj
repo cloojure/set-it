@@ -25,7 +25,7 @@
       (unvar (var five))
       (unvar local-var-five))
 
-    ; When passed any rag except a Var object, `unvar` returns it unchanged
+    ; When passed any arg except a Var object, `unvar` returns it unchanged
     (is= 5
       (unvar five)
       (unvar 5))
@@ -38,6 +38,7 @@
 
     ; These are all equivalent
     (is= 5
+      (unvar local-var-five)
       (var-get local-var-five)
       (deref local-var-five)
       @local-var-five)))
@@ -49,31 +50,59 @@
   (is (var? #'five)) ; shortcut for above
   (with-local-vars [x 42]
     (is (var? x))
-    (is= 42 (unvar x) (deref x) (var-get x) @x))
+    (is= 42
+      (unvar x) ; these all yield the same value
+      (deref x)
+      (var-get x)
+      @x))
 
-  (isnt (atom? 5))
-  (is (atom? (atom 5)))
-  (isnt (atom? (agent 5)))
+  (let [the-value 5
+        the-var (var-anon the-value)
+        the-atom (atom the-value)
+        the-agent (agent the-value)
+        the-ref (ref the-value)
+        value? (fn [arg] (= 5 arg)) ]
 
-  (isnt (agent? 5))
-  (is (agent? (agent 5)))
-  (isnt (agent? (atom 5)))
+    (is= the-value
+      @the-var
+      @the-atom
+      @the-agent
+      @the-ref )
 
-  (isnt (ref? 5))
-  (is (ref? (ref 5)))
-  (isnt (ref? (agent 5))))
+    (is (var? the-var))
+    (is (atom? the-atom))
+    (is (agent? the-agent))
+    (is (ref? the-ref))
 
-(dotest
-  (when false
-    (nl) (println :-----------------------------------------------------------------------------)
-    (println :ex-1)
-    ; for clojure.core/when & similar, can use short macro name and single-quote for `macroexpand`
-    (prn (macroexpand '(when true 5)))
+    (is   (value? the-value))
+    (isnt (var? the-value))
+    (isnt (atom? the-value))
+    (isnt (agent? the-value))
+    (isnt (ref? the-value))
 
-    ; for user macros, must use fully-qualified macro name and single-quote for `macroexpand`
-    (println :ex-2)
-    (prn (macroexpand '(demo.core/mylet wilma
-                         (+ wilma 3))))))
+    (isnt (value? the-var))
+    (is   (var? the-var))
+    (isnt (atom? the-var))
+    (isnt (agent? the-var))
+    (isnt (ref? the-var))
+
+    (isnt (value? the-atom))
+    (isnt (var? the-atom))
+    (is   (atom? the-atom))
+    (isnt (agent? the-atom))
+    (isnt (ref? the-atom))
+
+    (isnt (value? the-agent))
+    (isnt (var? the-agent))
+    (isnt (atom? the-agent))
+    (is   (agent? the-agent))
+    (isnt (ref? the-agent))
+
+    (isnt (value? the-ref))
+    (isnt (var? the-ref))
+    (isnt (atom? the-ref))
+    (isnt (agent? the-ref))
+    (is   (ref? the-ref))))
 
 ;---------------------------------------------------------------------------------------------------
 (dotest
@@ -112,7 +141,16 @@
       (set-it counter (inc it)))
     (is= 1 @counter)))
 
+(dotest
+  (let [x (atom 5)]
+    (is= @x 5)
+    (set-it x 6)
+    (is= (deref x) 6)
+    (set-it x (* it 7))
+    (is= @x 42)))
+
 ;---------------------------------------------------------------------------------------------------
+; Parents are regular Vars.  Kids are dynamic Vars.
 (def barney)
 (def betty "Hi")
 (def ^:dynamic pebbles)
@@ -125,7 +163,7 @@
   (isnt (bound? #'barney))
   (isnt (bound? #'pebbles))
 
-  ; none fo them are `thread-bound` since we haven't used the `binding` form
+  ; none of them are `thread-bound` since we haven't used the `binding` form
   (isnt (thread-bound? #'barney))
   (isnt (thread-bound? #'betty))
   (isnt (thread-bound? #'pebbles))
@@ -133,7 +171,7 @@
 
   ; Predicate `thread-bound?` returns true iff:
   ;   (and <var is dynamic>
-  ;        <withing `binding` scope> )
+  ;        <within a `binding` scope> )
   (binding [pebbles 3 ; only dynamic vars can be used in a `binding` form
             bambam  4]
     (is (bound? #'pebbles)) ; pebbles is now bound (to 3)
@@ -163,7 +201,10 @@
                   (set-it-dynamic fred (+ fred 11)) ; update using dynamic global value
                   (is= 88 fred)
                   (set-it-dynamic fred (+ it 11)) ; update using `it` placeholder symbol
-                  (is= 99 fred))]
+                  (is= 99 fred)
+                  ; modified dynamic value is returned
+                  )
+        ]
     (is= nil fred) ; root value
     (binding [fred 5] ; set fred to 5 in a dynamic frame
       (is= 5 fred)
@@ -172,6 +213,7 @@
     (is= nil fred))) ; outside of `binding`, we are back to the original root value
 
 ;-----------------------------------------------------------------------------
+; TLVs => Thread Local Vars
 (dotest
   (let [tlv-info (let-tlv-impl-preproc (quote [a 1 b 2]))]
     (with-map-vals tlv-info [syms-user syms-gen bindings-middle bindings-tlv]
@@ -189,7 +231,7 @@
         (is= 1 @a)
         (is= 3 @b))))
 
-  (let-tlv [x 5
+  (tlv-let [x 5
             y (+ x 2)] ; can refer to previous locals, unlike `with-local-vars`
     (is= clojure.lang.Var
       (type x)
@@ -205,18 +247,51 @@
     ; #todo what happens when you pass a TLV to a function?  via a Future?
     ))
 
-
 (dotest
-  (let [int-mult (fn [a b]
-                   (assert (and (pos-int? a) (pos-int? b)))
-                   (let-tlv [cum  0
+  (let [mult-int (fn [a b]
+                   (assert (and (int-pos? a) (int-pos? b)))
+                   (tlv-let [cum 0
                              cntr a]
                      (while (pos? (tlv-get cntr))
-                      ;(spyx [@cum @cntr])  ; can use reader macro `@` to deref
+                       ;(spyx [@cum @cntr])  ; can use reader macro `@` to deref
                        (tlv-set-it cum (+ it b))
                        (tlv-set-it cntr (dec it)))
-                     (tlv-get cum))) ; can use `tlv-get` or `deref`
+                     (tlv-get cum))) ; can use `tlv-get` or `deref` or `@`
         ]
-    (is= 12 (int-mult 4 3))))
+    (is= 12 (mult-int 4 3))))
+
+;-----------------------------------------------------------------------------
+(dotest
+  (let [mm {:a {:b {:c 3}}}
+        m2 (set-it-in mm [:a :b :c] 666) ; ignore old value
+        m3 (set-it-in mm [:a :b :c] (* 6 (+ 4 it)))] ; modify old value
+    (is= m2 {:a {:b {:c 666}}})
+    (is= m3 {:a {:b {:c 42}}})
+    (throws? (set-it-in mm [:a :b :zzz] -1)))) ; throws for invalid path
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 

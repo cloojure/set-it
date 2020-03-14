@@ -1,5 +1,6 @@
 (ns demo.core
-  (:use tupelo.core))
+  (:use tupelo.core)
+  (:import [com.sun.org.apache.xalan.internal.xsltc.compiler When]))
 
 (defn atom?
   "Returns true iff arg is a clojure.lang.Atom."
@@ -30,14 +31,17 @@
          (with-local-vars ~bindings-tlv
            ~@forms)))))
 
-(defmacro let-tlv
+(defmacro tlv-let
+  "Creates Thread-Local-Var (TLVs) in a `let` form"
   [bindings & forms]
   (let-tlv-impl bindings forms)) ; pass `forms` as a seq, not using `apply`
 
 (defmacro tlv-get
+  "Returns value of a Thread-Local-Var (TLVs)"
   [var-sym] `(clojure.core/var-get ~var-sym ))
 
 (defmacro tlv-set-it
+  "Modifies the value of a Thread-Local-Var (TLVs) using the `it` placeholder"
   [ltv-sym & forms]
   `(let [local-var-obj#   ~ltv-sym
          ~'it             (clojure.core/deref local-var-obj#)
@@ -48,6 +52,17 @@
          ~@forms))) )
 
 (defmacro set-it
+  "Changes the value of a Var, Atom, Agent, or Ref using either `set` or `update` style, where the
+   current value is available via the placeholder symbol `it`:
+
+        (dotest
+          (let [x (atom 5)]
+            (is= @x 5)              ; initial value
+            (set-it x 6)            ; assign new value
+            (is= (deref x) 6)       ; can use `@` or `deref` to access value
+            (set-it x (* it 7))     ; update old value using `it` placeholder symbol
+            (is= @x 42)))           ; verify expected result
+ "
   [state & forms]
   `(do
     ;(spyx (var? ~state))
@@ -76,27 +91,29 @@
   [var-sym & forms]
   `(let [~'it ~var-sym]
      (clojure.core/var-set (var ~var-sym) ~@forms)))
-  (comment  ; alternate implementation
-    (defmacro var-set-dynamic-1
-      [var-sym val] (list 'set! var-sym val)))
-
-(defmacro mylet
-  [mysym & forms]
-  `(do
-     (let [~mysym 5]
-       ~@forms)))
+(comment  ; alternate implementation
+  (defmacro var-set-dynamic-1
+    [var-sym val] (list 'set! var-sym val)))
 
 (defmacro var-anon
   [val]
   `(def new-var# ~val))
 
 (defn unvar
-  "When passed a clojure var-object, returns the referenced value (via deref/var-get);
+  " When passed a clojure var-object, returns the referenced value (via deref/var-get);
   else returns arg unchanged. Idempotent to multiple calls."
   [value-or-var]
   (if (var? value-or-var)
     (deref value-or-var) ; or var-get
     value-or-var))
+
+(defmacro set-it-in
+  [mappy path & forms]
+  `(let [val-orig#     (fetch-in ~mappy ~path)
+         delta-fn#     (fn [~'it] ~@forms)
+         val-new#      (delta-fn# val-orig#)
+         mappy-result# (assoc-in ~mappy ~path val-new#)]
+     mappy-result#))
 
 
 
