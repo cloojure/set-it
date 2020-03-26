@@ -2,6 +2,7 @@
   (:use tupelo.core)
   (:import [com.sun.org.apache.xalan.internal.xsltc.compiler When]))
 
+;-----------------------------------------------------------------------------
 (defn atom?
   "Returns true iff arg is a clojure.lang.Atom."
   [arg] (= (type arg) clojure.lang.Atom))
@@ -12,45 +13,20 @@
   "Returns true iff arg is a clojure.lang.Ref."
   [arg] (= (type arg) clojure.lang.Ref))
 
-(defn ^:no-doc let-tlv-impl-preproc
-  [bindings-user] ; e.g. [a 1 b 2]
-  (let [syms-user       (mapv first (partition 2 bindings-user)) ; e.g. [a b]
-        syms-gen        (mapv #(gensym %) syms-user) ; e.g. [a24120 b24121]
-        bindings-middle (vec (interleave syms-gen syms-user)) ; e.g.  [a24120 a b24121 b]
-        bindings-tlv    (vec (interleave syms-user syms-gen))] ; e.g.  [a a24120 b b24121]
-    (vals->map syms-user syms-gen bindings-middle bindings-tlv)))
+;-----------------------------------------------------------------------------
+(defmacro var-anon
+  [val]
+  `(def new-var# ~val))
 
-(defn ^:no-doc let-tlv-impl
-  [bindings-user  ; e.g. [a 1 b 2]
-   forms] ; e.g. [ (prt @a) (prt @b) ]
-  (let [preproc-info    (let-tlv-impl-preproc bindings-user)
-        bindings-middle (:bindings-middle preproc-info)
-        bindings-tlv    (:bindings-tlv preproc-info)]
-    `(let ~bindings-user
-       (let ~bindings-middle
-         (with-local-vars ~bindings-tlv
-           ~@forms)))))
+(defn unvar
+  "When passed a clojure var-object, returns the referenced value (via deref/var-get).
+  Otherwise, returns arg unchanged. Idempotent to multiple calls."
+  [value-or-var]
+  (if (var? value-or-var)
+    (deref value-or-var) ; or var-get
+    value-or-var))
 
-(defmacro tlv-let
-  "Creates Thread-Local-Var (TLVs) in a `let` form"
-  [bindings & forms]
-  (let-tlv-impl bindings forms)) ; pass `forms` as a seq, not using `apply`
-
-(defmacro tlv-get
-  "Returns value of a Thread-Local-Var (TLVs)"
-  [var-sym] `(clojure.core/var-get ~var-sym ))
-
-(defmacro tlv-set-it
-  "Modifies the value of a Thread-Local-Var (TLVs) using the `it` placeholder"
-  [ltv-sym & forms]
-  `(let [local-var-obj#   ~ltv-sym
-         ~'it             (clojure.core/deref local-var-obj#)
-      ;  ~ltv-sym         ~'it ; use of target var disabled
-        ]
-     (clojure.core/var-set local-var-obj#
-       (do
-         ~@forms))) )
-
+;-----------------------------------------------------------------------------
 (defmacro set-it
   "Changes the value of a Var, Atom, Agent, or Ref using either `set` or `update` style, where the
    current value is available via the placeholder symbol `it`:
@@ -65,7 +41,7 @@
  "
   [state & forms]
   `(do
-    ;(spyx (var? ~state))
+     ;(spyx (var? ~state))
      (cond
        (atom? ~state) (swap! ~state
                         (fn [~'it]
@@ -95,18 +71,6 @@
   (defmacro var-set-dynamic-1
     [var-sym val] (list 'set! var-sym val)))
 
-(defmacro var-anon
-  [val]
-  `(def new-var# ~val))
-
-(defn unvar
-  " When passed a clojure var-object, returns the referenced value (via deref/var-get);
-  else returns arg unchanged. Idempotent to multiple calls."
-  [value-or-var]
-  (if (var? value-or-var)
-    (deref value-or-var) ; or var-get
-    value-or-var))
-
 (defmacro set-it-in
   [mappy path & forms]
   `(let [val-orig#     (fetch-in ~mappy ~path)
@@ -115,25 +79,45 @@
          mappy-result# (assoc-in ~mappy ~path val-new#)]
      mappy-result#))
 
+;-----------------------------------------------------------------------------
+(defn ^:no-doc let-tlv-impl-preproc
+  [bindings-user] ; e.g. [a 1 b 2]
+  (let [syms-user       (mapv first (partition 2 bindings-user)) ; e.g. [a b]
+        syms-gen        (mapv #(gensym %) syms-user) ; e.g. [a24120 b24121]
+        bindings-middle (vec (interleave syms-gen syms-user)) ; e.g.  [a24120 a b24121 b]
+        bindings-tlv    (vec (interleave syms-user syms-gen))] ; e.g.  [a a24120 b b24121]
+    (vals->map syms-user syms-gen bindings-middle bindings-tlv)))
 
+(defn ^:no-doc let-tlv-impl
+  [bindings-user ; e.g. [a 1 b 2]
+   forms] ; e.g. [ (prt @a) (prt @b) ]
+  (let [preproc-info    (let-tlv-impl-preproc bindings-user)
+        bindings-middle (:bindings-middle preproc-info)
+        bindings-tlv    (:bindings-tlv preproc-info)]
+    `(let ~bindings-user
+       (let ~bindings-middle
+         (with-local-vars ~bindings-tlv
+           ~@forms)))))
 
+(defmacro tlv-let
+  "Creates Thread-Local-Var (TLVs) in a `let` form"
+  [bindings & forms]
+  (let-tlv-impl bindings forms)) ; pass `forms` as a seq, not using `apply`
 
+(defmacro tlv-get
+  "Returns value of a Thread-Local-Var (TLVs)"
+  [var-sym] `(clojure.core/var-get ~var-sym))
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+(defmacro tlv-set-it
+  "Modifies the value of a Thread-Local-Var (TLVs) using the `it` placeholder"
+  [ltv-sym & forms]
+  `(let [local-var-obj# ~ltv-sym
+         ~'it (clojure.core/deref local-var-obj#)
+         ;  ~ltv-sym         ~'it ; use of target var disabled
+         ]
+     (clojure.core/var-set local-var-obj#
+       (do
+         ~@forms))))
 
 
 

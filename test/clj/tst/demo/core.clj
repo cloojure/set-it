@@ -263,33 +263,37 @@
 ;-----------------------------------------------------------------------------
 (dotest
   (let [mm {:a {:b {:c 3}}}
-        m2 (set-it-in mm [:a :b :c] 666) ; ignore old value
-        m3 (set-it-in mm [:a :b :c] (* 6 (+ 4 it)))] ; modify old value
-    (is= m2 {:a {:b {:c 666}}})
-    (is= m3 {:a {:b {:c 42}}})
-    (throws? (set-it-in mm [:a :b :zzz] -1)))) ; throws for invalid path
+        vv [[:00 :01 :02]
+            [:10 :11 :12]] ] ; modify old value
+    (is= (set-it-in mm [:a :b :c] 666) ; ignore old value
+      {:a {:b {:c 666}}})
+    (is= (set-it-in mm [:a :b :c] (* 6 (+ 4 it))) ; modify old value
+      {:a {:b {:c 42}}})
+    (is= (set-it-in vv [1 2] 999) ; also works for nested vectors
+      [[:00 :01 :02]
+       [:10 :11 999]])
+    (throws? (set-it-in mm [:a :b :zzz] -1)) ; throws for invalid path
+    ))
 
+;-----------------------------------------------------------------------------
+(defn depth
+  [arg]
+  (let [max-depth (atom 0)]
+    (walk-with-parents-readonly arg
+      {:enter (fn [parents -item-]
+                (set-it max-depth
+                  (max it (count parents))))})
+    @max-depth))
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+(dotest
+  (is= 0 (depth 0))
+  (is= 0 (depth []))
+  (is= 2 (depth [[1] [2] 3]))
+  (is= 3 (depth [[1] [2] [1 [2]]]))
+  (is= 4 (depth '(1 (2 3 (4 5 6 (7 8 9 10))))))
+  (is= 3 (depth #{1 #{2 3 #{4}}}))
+  (is= 2 (depth {:foo {:bar 1}}))
+  (is= 5 (depth {:a [1 2 '(3 4 #{5 {:z "baz"}})]})) )
 
 
 
