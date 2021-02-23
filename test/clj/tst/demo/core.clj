@@ -125,10 +125,10 @@
   (let [counter (agent nil)]
     (is= nil @counter)
     (set-it counter 0)
-    (Thread/sleep 234)
+    (await counter)
     (is= 0 @counter)
     (set-it counter (inc it))
-    (Thread/sleep 234)
+    (await counter)
     (is= 1 @counter))
 
   (let [counter (ref nil)]
@@ -153,39 +153,39 @@
 ; Parents are regular Vars.  Kids are dynamic Vars.
 (def barney)
 (def betty "Hi")
-(def ^:dynamic pebbles)
-(def ^:dynamic bambam "Bam!")
+(def ^:dynamic bambam)
+(def ^:dynamic pebbles "Bam!")
 
 (dotest
   ; only vars supplied with an initial value are `bound`
   (is (bound? #'betty))
-  (is (bound? #'bambam))
+  (is (bound? #'pebbles))
   (isnt (bound? #'barney))
-  (isnt (bound? #'pebbles))
+  (isnt (bound? #'bambam))
 
   ; none of them are `thread-bound` since we haven't used the `binding` form
   (isnt (thread-bound? #'barney))
   (isnt (thread-bound? #'betty))
-  (isnt (thread-bound? #'pebbles))
   (isnt (thread-bound? #'bambam))
+  (isnt (thread-bound? #'pebbles))
 
   ; Predicate `thread-bound?` returns true iff:
   ;   (and <var is dynamic>
   ;        <within a `binding` scope> )
-  (binding [pebbles 3 ; only dynamic vars can be used in a `binding` form
-            bambam  4]
-    (is (bound? #'pebbles)) ; pebbles is now bound (to 3)
-    (is (bound? #'bambam))  ; bambam is still bound, but to a new value 4
-    (is (thread-bound? #'pebbles)) ; both are thread-bound since we...
-    (is (thread-bound? #'bambam)) ;  ...are in the `binding` form
-    (is= 3 pebbles) ; both values can be accessed thru the global symbol...
-    (is= 4 bambam))) ;  ...and we see the dynamic value present
+  (binding [bambam  3 ; only dynamic vars can be used in a `binding` form
+            pebbles 4]
+    (is (bound? #'bambam)) ; bambam is now bound (to 3)
+    (is (bound? #'pebbles))  ; pebbles is still bound, but to a new value 4
+    (is (thread-bound? #'bambam)) ; both are thread-bound since we...
+    (is (thread-bound? #'pebbles)) ;  ...are in the `binding` form
+    (is= 3 bambam) ; both values can be accessed thru the global symbol...
+    (is= 4 pebbles))) ;  ...and we see the dynamic value present
 
 (def ^:dynamic fred nil)
 (dotest
   (let [dyny-fn (fn []
-                  (is= 5 fred)
-                  (isnt (var? fred)) ; fred resolves to 5, not a Var object
+                  (is= 5 fred) ; fred resolves to 5...
+                  (isnt (var? fred)) ; ... and 5 is not a Var object (**** WEIRD! *****)
                   (is (bound? (var fred))) ; the Var object has both a root binding...
                   (is (thread-bound? (var fred))) ; ...and a thread binding
 
@@ -209,7 +209,8 @@
     (binding [fred 5] ; set fred to 5 in a dynamic frame
       (is= 5 fred)
       (dyny-fn) ; function both reads dynamic value 5, then updates it to 99
-      (is= 99 fred))
+      (is= 99 fred)
+    )   ; exit binding scope for `fred`
     (is= nil fred))) ; outside of `binding`, we are back to the original root value
 
 ;-----------------------------------------------------------------------------
@@ -232,14 +233,16 @@
         (is= 3 @b))))
 
   (tlv-let [x 5
-            y (+ x 2)] ; can refer to previous locals, unlike `with-local-vars`
+            y (+ x 2)] ; 'y' can refer to previous tlv declaration 'x', unlike `with-local-vars`
     (is= clojure.lang.Var
       (type x)
       (type y))
     (is= 5 (tlv-get x)) ; or @x
     (is= 7 (tlv-get y)) ; or @y
+
     (tlv-set-it x (inc it)) ; no `tlv-get` required on target var if use pronoun `it`
     (is= 6 (tlv-get x))
+
     (tlv-set-it y (* it (tlv-get x))) ; can use `it` for target; `tlv-get` required for other TLVs
     (is= 42 @y)
 
@@ -261,7 +264,7 @@
     (is= 12 (mult-int 4 3))))
 
 ;-----------------------------------------------------------------------------
-(dotest
+(dotest ; #todo maybe rename => (set-it-path  ...)
   (let [mm {:a {:b {:c 3}}}
         vv [[:00 :01 :02]
             [:10 :11 :12]] ] ; modify old value
